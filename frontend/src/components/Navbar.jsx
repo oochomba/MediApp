@@ -1,9 +1,18 @@
 import React from 'react'
-// import { navbarStyles } from '../assets/dummyStyles'
+import { navbarStyles } from '../assets/dummyStyles'
 
 function Navbar() {
   return (
-    <div>Navbar</div>
+    <>
+      <div className={navbarStyles.navbarBorder}>
+      </div>
+<nav className={`${navbarStyles.navbarContainer} ${
+
+}`}>
+
+</nav>
+
+    </>
   )
 }
 
