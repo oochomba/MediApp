@@ -4,11 +4,9 @@ import { navbarStyles } from '../assets/dummyStyles'
 function Navbar() {
   return (
     <>
-      <div className={navbarStyles.navbarBorder}>
-      </div>
-<nav className={`${navbarStyles.navbarContainer} ${
-
-}`}>
+<div className={navbarStyles.navbarBorder}>
+</div>
+<nav className={`${navbarStyles.navbarContainer}`}>
 
 </nav>
 
