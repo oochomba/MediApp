@@ -1,9 +1,9 @@
 import React, { useRef, useState } from "react";
-import { SignedOut, useClerk } from "@clerk/clerk-react";
+import { SignedOut, SignedIn, useClerk, UserButton } from "@clerk/clerk-react";
 import { navbarStyles } from "../assets/dummyStyles";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import logo from "../assets/logo.png";
-import { User,Key } from "lucide-react";
+import { User, Key } from "lucide-react";
 
 function Navbar() {
   const STORAGE_KEY = "doctorToken_v1";
@@ -96,6 +96,10 @@ function Navbar() {
                 </button>             
 
               </SignedOut>
+
+              <SignedIn>
+                <UserButton autosignOutUrl="/" />
+              </SignedIn>
             </div>
           </div>
         </div>
