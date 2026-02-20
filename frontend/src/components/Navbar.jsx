@@ -1,17 +1,107 @@
-import React from 'react'
-import { navbarStyles } from '../assets/dummyStyles'
+import React, { useRef, useState } from "react";
+import { SignedOut, useClerk } from "@clerk/clerk-react";
+import { navbarStyles } from "../assets/dummyStyles";
+import { useLocation, useNavigate, Link } from "react-router-dom";
+import logo from "../assets/logo.png";
+import { User,Key } from "lucide-react";
 
 function Navbar() {
+  const STORAGE_KEY = "doctorToken_v1";
+  const [isOpen, setIsOpen] = useState(false);
+  const [showNavbar, setShowNavbar] = useState(true);
+  const [lastScrollY, setLastScrollY] = useState(0);
+  const [isDoctorLoggedIn, setIsDoctorLoggedIn] = useState(() => {
+    try {
+      return Boolean(localStorage.getItem(STORAGE_KEY));
+    } catch {
+      return false;
+    }
+  });
+  const location = useLocation();
+  const navRef = useRef(null);
+  const clerk = useClerk();
+  const navigate = useNavigate();
+
+  const navItems = [
+    { label: "Home", href: "/" },
+    { label: "Doctors", href: "/doctors" },
+    { label: "Services", href: "/services" },
+    { label: "Appointments", href: "/appointments" },
+    { label: "Contact", href: "/contact" },
+  ];
+
   return (
     <>
-<div className={navbarStyles.navbarBorder}>
-</div>
-<nav className={`${navbarStyles.navbarContainer}`}>
+      <div className={navbarStyles.navbarBorder}></div>
+      <nav
+        className={`${navbarStyles.navbarContainer} ${
+          showNavbar ? navbarStyles.navbarVisible : navbarStyles.navbarHidden
+        }`}
+      >
+        <div className={navbarStyles.contentWrapper}>
+          <div className={navbarStyles.flexContainer}>
+            {/* logo */}
+            <Link to="/" className={navbarStyles.logoLink}>
+              <div className={navbarStyles.logoContainer}>
+                <div className={navbarStyles.logoImageWrapper}>
+                  <img
+                    src={logo}
+                    alt="Logo"
+                    className={navbarStyles.logoImage}
+                  />
+                </div>
+              </div>
+              <div className={navbarStyles.logoTextContainer}>
+                <h1 className={navbarStyles.logoTitle}>MediConnect</h1>
+                <p className={navbarStyles.logoSubtitle}>
+                  Your Health, Our Priority
+                </p>
+              </div>
+            </Link>
 
-</nav>
+            {/* nav items */}
+            <div className={navbarStyles.desktopNav}>
+              <div className={navbarStyles.navItemsContainer}>
+                {navItems.map((item) => (
+                  <Link
+                    key={item.href}
+                    to={item.href}
+                    className={`${navbarStyles.navItem} ${location.pathname === item.href ? navbarStyles.navItemActive : navbarStyles.navItemInactive}`}
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
+            </div>
 
+            {/* right navbar items */}
+            <div className={navbarStyles.rightContainer}>
+              <SignedOut>
+                <Link
+                  to="doctor-admin/login"
+                  className={navbarStyles.doctorAdminButton}
+                >
+                  <User className={navbarStyles.doctorAdminIcon} />
+                  <span className={navbarStyles.doctorAdminText}>
+                  Doctor Admin
+                  </span>
+                </Link>
+
+                {/* Patient Login */}
+                <button
+                  onClick={() => clerk.openSignIn()} className={navbarStyles.loginButton}
+                >
+                <Key className={navbarStyles.loginIcon} />                  
+                   Login                
+                </button>             
+
+              </SignedOut>
+            </div>
+          </div>
+        </div>
+      </nav>
     </>
-  )
+  );
 }
 
-export default Navbar
+export default Navbar;
