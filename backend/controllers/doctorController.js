@@ -135,11 +135,292 @@ export const createDoctor = async (req, res) => {
     }
 };
 
+// Controller function to get doctors with search and pagination
 export const getDoctors = async (req, res) => {
     try {
-        const doctors = await Doctor.find();
-        res.status(200).json(doctors);
-    } catch (error) {
-        res.status(400).json({ error: error.message });
+        const { q = "", limit: limitRaw = 200, page: pageRaw = 1 } = req.query;
+        const limit = Math.min(500, Math.max(1, parseInt(limitRaw, 10) || 200));
+        const page = Math.max(1, parseInt(pageRaw, 10) || 1);
+        const skip = (page - 1) * limit;
+
+        const match = {};
+        if (q && typeof q === "string" && q.trim()) {
+            const re = new RegExp(q.trim(), "i");
+            match.$or = [{ name: re }, { specialization: re }, { speciality: re }, { email: re }];
+        }
+
+        const docs = await Doctor.aggregate([
+            { $match: match },
+            {
+                $lookup: {
+                    from: "appointments",
+                    localField: "_id",
+                    foreignField: "doctorId",
+                    as: "appointments",
+                },
+            },
+            {
+                $addFields: {
+                    appointmentsTotal: { $size: "$appointments" },
+                    appointmentsCompleted: {
+                        $size: {
+                            $filter: { input: "$appointments", as: "a", cond: { $in: ["$$a.status", ["Confirmed", "Completed"]] } }
+                        }
+                    },
+                    appointmentsCanceled: {
+                        $size: {
+                            $filter: { input: "$appointments", as: "a", cond: { $eq: ["$$a.status", "Canceled"] } }
+                        }
+                    },
+                    earnings: {
+                        $sum: {
+                            $map: {
+                                input: {
+                                    $filter: { input: "$appointments", as: "a", cond: { $in: ["$$a.status", ["Confirmed", "Completed"]] } }
+                                },
+                                as: "p",
+                                in: { $ifNull: ["$$p.fees", 0] }
+                            }
+                        }
+                    }
+                }
+            },
+            { $project: { appointments: 0 } },
+            { $sort: { name: 1 } },
+            { $skip: skip },
+            { $limit: limit }
+        ]);
+
+        const normalized = docs.map((d) => ({
+            _id: d._id,
+            id: d._id,
+            name: d.name || "",
+            specialization: d.specialization || d.speciality || "",
+            fee: d.fee ?? d.fees ?? d.consultationFee ?? 0,
+            imageUrl: d.imageUrl || d.image || d.avatar || null,
+            appointmentsTotal: d.appointmentsTotal || 0,
+            appointmentsCompleted: d.appointmentsCompleted || 0,
+            appointmentsCanceled: d.appointmentsCanceled || 0,
+            earnings: d.earnings || 0,
+            availability: d.availability ?? "Available",
+            schedule: (d.schedule && typeof d.schedule === "object") ? d.schedule : {},
+            patients: d.patients ?? "",
+            rating: d.rating ?? 0,
+            about: d.about ?? "",
+            experience: d.experience ?? "",
+            qualifications: d.qualifications ?? "",
+            location: d.location ?? "",
+            success: d.success ?? "",
+            raw: d,
+        }));
+
+        const total = await Doctor.countDocuments(match);
+        return res.json({ success: true, data: normalized, doctors: normalized, meta: { page, limit, total } });
+    } catch (err) {
+        console.error("getDoctors:", err);
+        return res.status(500).json({ success: false, message: "Server error" });
     }
+};
+
+
+export async function getDoctorById(req, res) {
+    try {
+        const { id } = req.params;
+        const doctor = await Doctor.findById(id).select("-password").lean();
+        if (!doctor) {
+            return res.status(404).json({
+                success: false,
+                message: "Doctor not found"
+            });
+        }
+        res.status(200).json({
+            success: true,
+            data: normalizeDocForClient(doctor)
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
+    }
+}
+
+
+export async function updateDoctor(req, res) {
+    try {
+        const { id } = req.params;
+        const body = req.body || {};
+
+        if (!req.doctor || String(req.doctor._id || req.doctor.id) !== String(id)) {
+            return res.status(403).json({ success: false, message: "Not authorized to update this doctor" });
+        }
+
+        const existing = await Doctor.findById(id);
+        if (!existing) return res.status(404).json({ success: false, message: "Doctor not found" });
+
+        if (req.file?.path) {
+            const uploaded = await uploadToCloudinary(req.file.path, "doctors");
+            if (uploaded) {
+                const previousPublicId = existing.imagePublicId;
+                existing.imageUrl = uploaded.secure_url || uploaded.url || existing.imageUrl;
+                existing.imagePublicId = uploaded.public_id || uploaded.publicId || existing.imagePublicId;
+                if (previousPublicId && previousPublicId !== existing.imagePublicId) {
+                    deleteFromCloudinary(previousPublicId).catch((e) => console.warn("deleteFromCloudinary warning:", e?.message || e));
+                }
+            }
+        } else if (body.imageUrl) {
+            existing.imageUrl = body.imageUrl;
+        }
+
+        if (body.schedule) existing.schedule = parseScheduleInput(body.schedule);
+
+        const updatable = ["name", "specialization", "experience", "qualifications", "location", "about", "fee", "availability", "success", "patients", "rating"];
+        updatable.forEach((k) => { if (body[k] !== undefined) existing[k] = body[k]; });
+
+        if (body.email && body.email !== existing.email) {
+            const other = await Doctor.findOne({ email: body.email.toLowerCase() });
+            if (other && other._id.toString() !== id) return res.status(409).json({ success: false, message: "Email already in use" });
+            existing.email = body.email.toLowerCase();
+        }
+
+        if (body.password) existing.password = body.password;
+
+        await existing.save();
+
+        const out = normalizeDocForClient(existing.toObject());
+        delete out.password;
+        return res.json({ success: true, data: out });
+    } catch (err) {
+        console.error("updateDoctor error:", err);
+        return res.status(500).json({ success: false, message: "Server error" });
+    }
+}
+
+
+// Controller function to delete a doctor
+export async function deleteDoctor(req, res) {
+    try {
+        const { id } = req.params;
+        const doctor = await Doctor.findById(id);
+        if (!doctor) {
+            return res.status(404).json({
+                success: false,
+                message: "Doctor not found"
+            });
+        }
+
+        if (doctor.imagePublicId) {
+            try {
+                await deleteFromCloudinary(doctor.imagePublicId);
+            } catch (e) {
+                console.warn("deleteFromCloudinary warning:", e?.message || e);
+            }
+
+            if (!req.doctor || String(req.doctor._id || req.doctor.id) !== String(id)) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Not authorized to delete this doctor"
+                });
+            }
+        }
+
+        await Doctor.findByIdAndDelete(id);
+        res.json({
+            success: true,
+            message: "Doctor deleted successfully"
+        });
+    } catch (error) {
+        console.error("deleteDoctor error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
+    }
+}
+//to toggle availability
+export async function toggleAvailability(req, res) {
+    try {
+        const { id } = req.params;
+        if (!req.doctor || String(req.doctor._id || req.doctor.id) !== String(id)) {
+            return res.status(403).json({ success: false, message: "Not authorized to update this doctor" });
+        }
+
+        const doctor = await Doctor.findById(id);
+        if (!doctor) {
+            return res.status(404).json({
+                success: false,
+                message: "Doctor not found"
+            });
+        }
+
+        if (typeof doctor.availability === "boolean") {
+            doctor.availability = !doctor.availability;
+        } else {
+            doctor.availability = doctor.availability === "Available" ? "Unavailable" : "Available";
+        }
+        await doctor.save();
+        const out = normalizeDocForClient(doctor.toObject());
+        delete out.password;
+
+        res.json({
+            success: true,
+            data: out
+        });
+    } catch (error) {
+        console.error("toggleDoctorAvailability error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Server error"
+        });
+    }
+}
+
+//to login doctor
+export async function loginDoctor(req, res) {
+    try {
+        const { email, password } = req.body || {};
+        if (!email || !password) {
+            return res.status(400).json({ success: false, message: "Email and password are required" });
+        }
+
+        const doctor = await Doctor.findOne({ email: email.toLowerCase() }).select("+password");
+        if (!doctor) {
+            return res.status(401).json({ success: false, message: "Invalid credentials" });
+        }
+
+        if (doctor.password !== password) {
+            return res.status(401).json({ success: false, message: "Invalid credentials" });
+        }
+
+        // const isMatch = await doctor.comparePassword(password);
+        // if (!isMatch) {
+        //     return res.status(401).json({ success: false, message: "Invalid credentials" });
+        // }
+        const secret = process.env.JWT_SECRET;
+        if (!secret) {
+            return res.status(500).json({ success: false, message: "Server configuration error" });
+        }
+        const token = jwt.sign({
+            id: doctor._id.toString(),
+            email: doctor.email
+        }, secret, { expiresIn: "7d" });
+
+        const out = normalizeDocForClient(doctor.toObject());
+        delete out.password;
+        return res.json({ success: true, data: { doctor: out, token } });
+    } catch (error) {
+        console.error("login Doctor error:", error);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+}
+
+/// Export the controller functions
+export default {
+    createDoctor,
+    getDoctors,
+    getDoctorById,
+    updateDoctor,
+    deleteDoctor,
+    toggleAvailability,
+    loginDoctor,
 };
