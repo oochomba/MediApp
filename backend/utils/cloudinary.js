@@ -1,4 +1,5 @@
 import { v2 as cloudinary } from 'cloudinary';
+import e from 'express';
 import fs from 'fs';
 
 cloudinary.config({
@@ -35,3 +36,5 @@ export async function deleteFromCloudinary(publicId) {
         throw new Error("Cloudinary delete error: " + error.message);
     }
 }
+
+export default cloudinary;
