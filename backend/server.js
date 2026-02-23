@@ -16,7 +16,8 @@ app.use(express.urlencoded({ extended: true,limit: '20mb' }));
 connectDB();
 
 // Routes
-
+app.use("/api/doctors", doctorRouter);
+ 
 app.get('/', (req, res) => {
   res.send('Hello World!');
 });
