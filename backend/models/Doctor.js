@@ -1,5 +1,4 @@
 import mongoose from "mongoose";
-import { isLowercase, trim } from "validator";
 
 const doctorSchema = new mongoose.Schema({
     email: {
